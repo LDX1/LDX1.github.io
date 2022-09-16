@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        />
+        <title>Document</title>
+    </head>
+    <body>
+        <select name="baseCurrency" id="baseCurrency">
+            <option value="aud">AUD</option>
+            <option value="bgn">BGN</option>
+            <option value="cad">CAD</option>
+            <option value="chf">CHF</option>
+            <option value="eur">EUR</option>
+            <option value="nzd">NZD</option>
+            <option selected="selected" value="usd">USD</option>
+        </select>
+
+        <div id="exchangeRatesList"></div>
+        <div id="longestExchangeRateGroup"></div>
+
+        <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+        <script>
+            const defaultBaseCurrency = "usd";
+            const baseCurrencies = [
+                "usd",
+                "eur",
+                "aud",
+                "cad",
+                "chf",
+                "nzd",
+                "bgn",
+            ];
+
+            const currencyApiUrl =
+                "https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies";
+
+            const fetchExchangeRate = async (baseCurrency, quoteCurrency) => {
+                try {
+                    const exchangeRate = await $.ajax({
+                        type: "GET",
+                        url: `${currencyApiUrl}/${baseCurrency}/${quoteCurrency}.json`,
+                        success: (exchangeRateResponse) =>
+                            exchangeRateResponse,
+                    });
+                    return [quoteCurrency, exchangeRate[quoteCurrency]];
+                } catch (error) {
+                    return null;
+                }
+            };
+
+            const fetchAllPossibleExchangeRates = async (
+                allAvailableCurrencies
+            ) => {
+                const now = new Date();
+                const formattedDate = `${now.getFullYear()}-${
+                    now.getMonth() + 1
+                }-${now.getDate()}`;
+
+                const cacheKey = `exam-${formattedDate}`;
+
+                const cachedExchangeRates =
+                    window.localStorage.getItem(cacheKey);
+                if (cachedExchangeRates) {
+                    return JSON.parse(cachedExchangeRates);
+                }
+
+                const promises = [];
+
+                for (let baseCurrency of baseCurrencies) {
+                    const baseCurrencyPromises = [];
+
+                    for (let quoteCurrency of allAvailableCurrencies) {
+                        if (baseCurrency === quoteCurrency) continue;
+
+                        const exchangeRateDetails = fetchExchangeRate(
+                            baseCurrency,
+                            quoteCurrency
+                        );
+                        baseCurrencyPromises.push(exchangeRateDetails);
+                    }
+
+                    promises.push(Promise.all(baseCurrencyPromises));
+                }
+
+                const promisesResults = await Promise.all(promises);
+
+                const addReciprocityRate = () => {
+                    const allPossibleExchangeRates = [];
+
+                    for (let [index, exchangeRateDetails] of Object.entries(
+                        promisesResults
+                    )) {
+                        // format for each exchange rate array [baseCurrency, quoteCurrency, exchangeRate]
+                        const specificBaseCurrencyExchangeRates = [];
+                        const baseCurrency = baseCurrencies[index];
+
+                        for (let [
+                            currency,
+                            exchangeRate,
+                        ] of exchangeRateDetails) {
+                            // E.g.: usd - eur, eur - usd
+
+                            // Ex. usd - eur
+                            specificBaseCurrencyExchangeRates.push([
+                                baseCurrency,
+                                currency,
+                                exchangeRate,
+                            ]);
+
+                            // Counterpart
+                            const counterPartCurrencyIndex =
+                                baseCurrencies.indexOf(currency);
+
+                            const [_, counterPartCurrencyExchangeRate] =
+                                promisesResults[
+                                    counterPartCurrencyIndex
+                                ].filter(
+                                    ([
+                                        counterPartCurrency,
+                                        counterPartCurrencyRate,
+                                    ]) => baseCurrency === counterPartCurrency
+                                )[0];
+
+                            // Ex. eur - usd
+                            specificBaseCurrencyExchangeRates.push([
+                                currency,
+                                baseCurrency,
+                                counterPartCurrencyExchangeRate,
+                            ]);
+                        }
+                        allPossibleExchangeRates.push(
+                            specificBaseCurrencyExchangeRates
+                        );
+                    }
+                    return allPossibleExchangeRates;
+                };
+                allPossibleExchangeRates = addReciprocityRate();
+
+                // sorted array of array of exchange rates
+                const sortedAllPossibleExchangeRates =
+                    allPossibleExchangeRates.map((exchangeRateArray) =>
+                        exchangeRateArray.sort((a, b) => a[2] - b[2])
+                    );
+                window.localStorage.setItem(
+                    cacheKey,
+                    JSON.stringify(sortedAllPossibleExchangeRates)
+                );
+
+                return sortedAllPossibleExchangeRates;
+            };
+
+            const fetchAllAvailableCurrencies = async () => {
+                const allAvailableCurrencies = await $.ajax({
+                    type: "GET",
+                    url: `${currencyApiUrl}.json`,
+                    success: (availableCurrencies) => availableCurrencies,
+                });
+
+                return allAvailableCurrencies;
+            };
+
+            const renderExchangeRates = (baseCurrency, ExchangeRates) => {
+                const index = baseCurrencies.indexOf(baseCurrency);
+
+                const exchangeRatesListElement =
+                    document.getElementById("exchangeRatesList");
+
+                const longestArrayElement = document.getElementById(
+                    "longestExchangeRateGroup"
+                );
+
+                let group1Details = {
+                    elements: "<p>Group 1</p><ul>",
+                    count: 0,
+                };
+                let group2Details = {
+                    elements: "<p>Group 2</p><ul>",
+                    count: 0,
+                };
+                let group3Details = {
+                    elements: "<p>Group 3</p><ul>",
+                    count: 0,
+                };
+
+                ExchangeRates[index].forEach((exchangeRateDetails) => {
+                    const [fromCurrency, quoteCurrency, exchangeRate] =
+                        exchangeRateDetails;
+                    const exchangeRateItem = `<li> ${fromCurrency.toUpperCase()} - ${quoteCurrency.toUpperCase()}: ${exchangeRate} </li>`;
+                    if (exchangeRate < 1) {
+                        group1Details.elements += exchangeRateItem;
+                        group1Details.count++;
+                    } else if (1.5 > exchangeRate >= 1) {
+                        group2Details.elements += exchangeRateItem;
+                        group2Details.count++;
+                    } else {
+                        group3Details.elements += exchangeRateItem;
+                        group3Details.count++;
+                    }
+                });
+
+                group1Details.elements += `</ul><p>Count: ${group1Details.count}</p>`;
+                group2Details.elements += `</ul><p>Count: ${group2Details.count}</p>`;
+                group3Details.elements += `</ul><p>Count: ${group3Details.count}</p>`;
+
+                exchangeRatesListElement.innerHTML = `${group1Details.elements}${group2Details.elements}${group3Details.elements}`;
+                longestArrayElement.innerHTML = `The length of the longest array: ${Math.max(
+                    group1Details.count,
+                    group2Details.count,
+                    group3Details.count
+                )}`;
+            };
+
+            const main = async () => {
+                const allPossibleExchangeRate =
+                    await fetchAllPossibleExchangeRates(baseCurrencies);
+
+                const exchangeRatesElement =
+                    document.getElementById("baseCurrency");
+
+                renderExchangeRates(
+                    defaultBaseCurrency,
+                    allPossibleExchangeRate
+                );
+
+                exchangeRatesElement.addEventListener("change", (event) => {
+                    const selectedBaseCurrency = event.target.value;
+                    renderExchangeRates(
+                        selectedBaseCurrency,
+                        allPossibleExchangeRate
+                    );
+                });
+            };
+
+            main();
+        </script>
+    </body>
+</html>
